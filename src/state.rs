@@ -52,10 +52,20 @@ impl EventKind {
     }
 }
 
+/// One column that differs between the cache and the latest Dualis response.
+/// `old` is `None` for a brand-new module, which has nothing to compare to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldChange {
+    pub column: String,
+    pub old: Option<String>,
+    pub new: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Event {
     pub kind: EventKind,
     pub name: String,
+    pub fields: Vec<FieldChange>,
 }
 
 /// The form in which two values are compared.
@@ -221,17 +231,40 @@ pub fn reconcile(
         record.insert(LAST_SEEN_COLUMN.to_owned(), observed_at.to_owned());
         record.insert(MISSING_SINCE_COLUMN.to_owned(), String::new());
 
-        let kind = match old_record {
-            None => Some(EventKind::New),
-            Some(old_record) => value_columns
-                .iter()
-                .any(|column| {
-                    comparison_key(value(old_record, column))
-                        != comparison_key(value(current_record, column))
-                })
-                .then_some(EventKind::Changed),
+        let reportable_columns = value_columns
+            .iter()
+            .filter(|column| column.as_str() != key_column && column.as_str() != NAME_COLUMN);
+
+        let event_kind = match old_record {
+            None => {
+                let fields = reportable_columns
+                    .filter_map(|column| {
+                        let new = value(current_record, column);
+                        (!new.is_empty()).then(|| FieldChange {
+                            column: column.clone(),
+                            old: None,
+                            new: new.to_owned(),
+                        })
+                    })
+                    .collect();
+                Some((EventKind::New, fields))
+            }
+            Some(old_record) => {
+                let fields: Vec<FieldChange> = reportable_columns
+                    .filter_map(|column| {
+                        let old = value(old_record, column);
+                        let new = value(current_record, column);
+                        (comparison_key(old) != comparison_key(new)).then(|| FieldChange {
+                            column: column.clone(),
+                            old: Some(old.to_owned()),
+                            new: new.to_owned(),
+                        })
+                    })
+                    .collect();
+                (!fields.is_empty()).then_some((EventKind::Changed, fields))
+            }
         };
-        if let Some(kind) = kind {
+        if let Some((kind, fields)) = event_kind {
             let name = match value(&record, NAME_COLUMN) {
                 "" => module_id,
                 name => name,
@@ -239,6 +272,7 @@ pub fn reconcile(
             events.push(Event {
                 kind,
                 name: name.to_owned(),
+                fields,
             });
         }
 
@@ -354,17 +388,35 @@ mod tests {
             .join(name)
     }
 
-    fn new(name: &str) -> Event {
-        Event {
-            kind: EventKind::New,
-            name: name.to_owned(),
+    fn new_field(column: &str, new: &str) -> FieldChange {
+        FieldChange {
+            column: column.to_owned(),
+            old: None,
+            new: new.to_owned(),
         }
     }
 
-    fn changed(name: &str) -> Event {
+    fn changed_field(column: &str, old: &str, new: &str) -> FieldChange {
+        FieldChange {
+            column: column.to_owned(),
+            old: Some(old.to_owned()),
+            new: new.to_owned(),
+        }
+    }
+
+    fn new(name: &str, fields: Vec<FieldChange>) -> Event {
+        Event {
+            kind: EventKind::New,
+            name: name.to_owned(),
+            fields,
+        }
+    }
+
+    fn changed(name: &str, fields: Vec<FieldChange>) -> Event {
         Event {
             kind: EventKind::Changed,
             name: name.to_owned(),
+            fields,
         }
     }
 
@@ -373,7 +425,17 @@ mod tests {
         let (_, events) =
             reconcile(&Table::default(), &initial(), "2026-09-14T06:00:00+00:00").unwrap();
 
-        assert_eq!(events, [new("Mathematik")]);
+        assert_eq!(
+            events,
+            [new(
+                "Mathematik",
+                vec![
+                    new_field("Endnote", "1,7"),
+                    new_field("Credits", "5"),
+                    new_field("Status", "bestanden"),
+                ]
+            )]
+        );
     }
 
     #[test]
@@ -384,7 +446,13 @@ mod tests {
 
         let (_, events) = reconcile(&state, &updated, "2026-09-14T06:15:00+00:00").unwrap();
 
-        assert_eq!(events, [changed("Mathematik")]);
+        assert_eq!(
+            events,
+            [changed(
+                "Mathematik",
+                vec![changed_field("Endnote", "1,7", "1,3")]
+            )]
+        );
     }
 
     #[test]
@@ -439,7 +507,17 @@ mod tests {
 
         let (state, events) = reconcile(&Table::default(), &current, "t").unwrap();
 
-        assert_eq!(events, [new("Mathematik")]);
+        assert_eq!(
+            events,
+            [new(
+                "Mathematik",
+                vec![
+                    new_field("Endnote", "1,7"),
+                    new_field("Credits", "5"),
+                    new_field("Status", "bestanden"),
+                ]
+            )]
+        );
         assert_eq!(state.rows.len(), 1);
     }
 
@@ -520,7 +598,14 @@ mod tests {
             assert_eq!(events, [], "{cache}");
 
             let (_, events) = reconcile(&previous, &changed_table, "t").unwrap();
-            assert_eq!(events, [changed("Theoretische Informatik I")], "{cache}");
+            assert_eq!(
+                events,
+                [changed(
+                    "Theoretische Informatik I",
+                    vec![changed_field("Endnote", "noch nicht gesetzt", "2,3")]
+                )],
+                "{cache}"
+            );
         }
     }
 

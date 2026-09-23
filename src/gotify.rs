@@ -7,7 +7,7 @@ use reqwest::Url;
 use reqwest::blocking::Client;
 use serde_json::json;
 
-use crate::state::{Event, EventKind};
+use crate::state::{Event, EventKind, FieldChange};
 
 /// Opened when the notification is tapped, and linked in the message text.
 const DUALIS_WEB_URL: &str = "https://dualis.dhbw.de/";
@@ -22,19 +22,20 @@ pub struct Notification {
 impl Notification {
     pub fn for_event(event: &Event) -> Self {
         let name = &event.name;
+        let details = format_fields(&event.fields);
         match event.kind {
             EventKind::Changed => Self {
                 title: format!("Note geändert: {name}"),
                 message: format!(
                     "Für {name} wurde eine Note geändert.\n\
-                     Gehe zu {DUALIS_WEB_URL}, um den aktuellen Stand einzusehen."
+                     {details}Gehe zu {DUALIS_WEB_URL}, um den aktuellen Stand einzusehen."
                 ),
             },
             EventKind::New => Self {
                 title: format!("Neue Note: {name}"),
                 message: format!(
                     "Für {name} wurden neue Ergebnisse veröffentlicht.\n\
-                     Gehe zu {DUALIS_WEB_URL}, um deine Note einzusehen."
+                     {details}Gehe zu {DUALIS_WEB_URL}, um deine Note einzusehen."
                 ),
             },
         }
@@ -46,6 +47,18 @@ impl Notification {
             message: "Testnachricht: Die Verbindung zu Gotify funktioniert.".to_owned(),
         }
     }
+}
+
+/// One line per changed field, e.g. `Endnote: 1,7 → 1,3`, or just the value
+/// for a brand-new module. Empty when there is nothing to report.
+fn format_fields(fields: &[FieldChange]) -> String {
+    fields
+        .iter()
+        .map(|field| match &field.old {
+            Some(old) => format!("{}: {old} → {}\n", field.column, field.new),
+            None => format!("{}: {}\n", field.column, field.new),
+        })
+        .collect()
 }
 
 pub struct GotifyClient {
@@ -114,6 +127,7 @@ mod tests {
             .match_body(Matcher::Json(json!({
                 "title": "Neue Note: Mathematik",
                 "message": "Für Mathematik wurden neue Ergebnisse veröffentlicht.\n\
+                            Endnote: 1,7\n\
                             Gehe zu https://dualis.dhbw.de/, um deine Note einzusehen.",
                 "priority": 8,
                 "extras": {
@@ -126,6 +140,11 @@ mod tests {
         let event = Event {
             kind: EventKind::New,
             name: "Mathematik".into(),
+            fields: vec![FieldChange {
+                column: "Endnote".into(),
+                old: None,
+                new: "1,7".into(),
+            }],
         };
 
         client.send(&Notification::for_event(&event)).unwrap();
@@ -154,12 +173,35 @@ mod tests {
         let event = Event {
             kind: EventKind::Changed,
             name: "Mathematik".into(),
+            fields: vec![FieldChange {
+                column: "Endnote".into(),
+                old: Some("1,7".into()),
+                new: "1,3".into(),
+            }],
         };
 
         let notification = Notification::for_event(&event);
 
         assert_eq!(notification.title, "Note geändert: Mathematik");
         assert!(notification.message.contains("wurde eine Note geändert"));
+        assert!(notification.message.contains("Endnote: 1,7 → 1,3"));
+    }
+
+    #[test]
+    fn event_without_fields_has_no_extra_line() {
+        let event = Event {
+            kind: EventKind::New,
+            name: "Mathematik".into(),
+            fields: vec![],
+        };
+
+        let notification = Notification::for_event(&event);
+
+        assert_eq!(
+            notification.message,
+            "Für Mathematik wurden neue Ergebnisse veröffentlicht.\n\
+             Gehe zu https://dualis.dhbw.de/, um deine Note einzusehen."
+        );
     }
 
     #[test]
