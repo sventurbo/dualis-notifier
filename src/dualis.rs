@@ -118,23 +118,51 @@ fn session_from_headers(headers: &HeaderMap) -> Result<Session> {
 }
 
 /// Decode a response like Python's `requests` did, so cached names stay equal:
-/// the charset from `Content-Type`, otherwise ISO-8859-1 for text responses.
+/// the charset from `Content-Type`, else a `<meta charset>` in the body itself
+/// (Dualis omits it from the header but declares it in the HTML), else
+/// ISO-8859-1 for text responses.
 fn decode_body(content_type: Option<&str>, body: &[u8]) -> String {
     let content_type = content_type.unwrap_or_default();
-    let charset = content_type.split(';').skip(1).find_map(|parameter| {
-        let (name, value) = parameter.split_once('=')?;
-        name.trim()
-            .eq_ignore_ascii_case("charset")
-            .then(|| value.trim().trim_matches(|c| c == '"' || c == '\''))
-    });
+    let label = charset_from_content_type(content_type).or_else(|| meta_charset(body));
 
-    match charset {
-        Some(label) if is_latin1_label(label) => decode_latin1(body),
-        Some(label) => match encoding_rs::Encoding::for_label(label.as_bytes()) {
-            Some(encoding) => encoding.decode_without_bom_handling(body).0.into_owned(),
-            None => String::from_utf8_lossy(body).into_owned(),
-        },
+    match label {
+        Some(label) => decode_with_label(&label, body),
         None if content_type.to_ascii_lowercase().contains("text") => decode_latin1(body),
+        None => String::from_utf8_lossy(body).into_owned(),
+    }
+}
+
+fn charset_from_content_type(content_type: &str) -> Option<String> {
+    content_type.split(';').skip(1).find_map(|parameter| {
+        let (name, value) = parameter.split_once('=')?;
+        name.trim().eq_ignore_ascii_case("charset").then(|| {
+            value
+                .trim()
+                .trim_matches(|c| c == '"' || c == '\'')
+                .to_owned()
+        })
+    })
+}
+
+/// `<meta charset="...">` or the older `<meta http-equiv="Content-Type"
+/// content="...; charset=...">`. Matched on raw bytes since meta tags are
+/// pure ASCII, so this needs no assumption about the body's own encoding.
+static META_CHARSET: LazyLock<regex::bytes::Regex> = LazyLock::new(|| {
+    regex::bytes::Regex::new(r#"(?is)<meta\b[^>]*charset\s*=\s*["']?([a-zA-Z0-9_-]+)"#)
+        .expect("valid regex")
+});
+
+fn meta_charset(body: &[u8]) -> Option<String> {
+    let capture = META_CHARSET.captures(body)?.get(1)?;
+    Some(String::from_utf8_lossy(capture.as_bytes()).into_owned())
+}
+
+fn decode_with_label(label: &str, body: &[u8]) -> String {
+    if is_latin1_label(label) {
+        return decode_latin1(body);
+    }
+    match encoding_rs::Encoding::for_label(label.as_bytes()) {
+        Some(encoding) => encoding.decode_without_bom_handling(body).0.into_owned(),
         None => String::from_utf8_lossy(body).into_owned(),
     }
 }
@@ -276,5 +304,34 @@ mod tests {
             "–"
         );
         assert_eq!(decode_body(None, utf8), "Prüfung – Öl");
+    }
+
+    #[test]
+    fn falls_back_to_meta_charset_when_header_omits_it() {
+        // Matches what the real Dualis server sends: no charset on the HTTP
+        // header, but a UTF-8 meta tag in the page itself.
+        let html = "<html><head>\
+                     <meta http-equiv=\"Content-Type\" \t\tcontent=\"text/html; charset=utf-8\" />\
+                     </head><body>unvollständig</body></html>";
+
+        assert_eq!(decode_body(Some("text/html"), html.as_bytes()), html);
+    }
+
+    #[test]
+    fn recognizes_the_html5_short_meta_charset_form() {
+        let html = "<html><head><meta charset=\"utf-8\"></head><body>Prüfung</body></html>";
+
+        assert_eq!(decode_body(Some("text/html"), html.as_bytes()), html);
+    }
+
+    #[test]
+    fn header_charset_still_wins_over_a_conflicting_meta_charset() {
+        let body: &[u8] = &[0xfc]; // 'ü' in ISO-8859-1
+        let html_with_utf8_meta = [b"<meta charset=\"utf-8\">".as_slice(), body].concat();
+
+        assert_eq!(
+            decode_body(Some("text/html; charset=iso-8859-1"), &html_with_utf8_meta),
+            "<meta charset=\"utf-8\">ü"
+        );
     }
 }
