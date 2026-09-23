@@ -162,7 +162,16 @@ Die ID steht – falls Dualis sie übergibt – in der Adresse einer Ergebnissei
 
 ## Docker (optional)
 
-Das Projekt lässt sich auch als Container ausführen. Im Projektordner bauen und starten:
+Das Projekt lässt sich auch als Container ausführen. Ein fertiges Image steht unter `ghcr.io/sventurbo/dualis-notifier:latest` bereit (wird bei jedem Push auf `main` automatisch gebaut):
+
+```bash
+docker run -d --name dualis-notifier --restart unless-stopped \
+  --env-file .env \
+  -v dualis-data:/data \
+  ghcr.io/sventurbo/dualis-notifier:latest
+```
+
+Alternativ selbst bauen:
 
 ```bash
 docker build -t dualis-notifier .
