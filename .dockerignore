@@ -1,6 +1,5 @@
-/target
+target/
+.env
 grades.csv
-grades.csv.tmp
 grades.html
 notifier.log
-.env

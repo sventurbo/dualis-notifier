@@ -1,0 +1,25 @@
+[package]
+name = "dualis-notifier"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Checks Dualis for new or changed grades and sends them to Gotify"
+publish = false
+
+[dependencies]
+anyhow = "1.0.104"
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+csv = "1.4.0"
+ctrlc = { version = "3.5.2", features = ["termination"] }
+encoding_rs = "0.8.41"
+regex = "1.13.1"
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "form", "rustls"] }
+scraper = "0.27.0"
+serde_json = "1.0.151"
+
+[dev-dependencies]
+mockito = "1.7.2"
+tempfile = "3.27.0"
+
+[profile.release]
+strip = true
