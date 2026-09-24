@@ -1,4 +1,7 @@
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hasher};
 use std::process::ExitCode;
+use std::time::Duration;
 use std::{env, thread};
 
 use anyhow::{Context, Result};
@@ -59,11 +62,62 @@ fn run(test_notification: bool) -> Result<()> {
     })
     .context("Signal-Handler kann nicht eingerichtet werden")?;
 
-    println!("I: Checking every {} min", interval.as_secs() / 60);
+    println!("I: Checking every {} min (±20%)", interval.as_secs() / 60);
     loop {
         if let Err(error) = notifier.run_once() {
             eprintln!("E: {error:#}");
         }
-        thread::sleep(interval);
+        thread::sleep(jittered(interval));
+    }
+}
+
+/// Randomizes `base` by up to ±20%, so checks don't land at a perfectly
+/// predictable cadence, which is easy for Dualis to fingerprint as a bot.
+fn jittered(base: Duration) -> Duration {
+    let spread = base / 5;
+    base - spread + random_duration_up_to(spread * 2)
+}
+
+/// A random duration in `[0, max]`. Seeded from `RandomState`'s per-process
+/// random keys (the same source `HashMap` uses), so no extra dependency is
+/// needed just for jitter.
+fn random_duration_up_to(max: Duration) -> Duration {
+    if max.is_zero() {
+        return Duration::ZERO;
+    }
+    let random = RandomState::new().build_hasher().finish();
+    Duration::from_nanos(random % (max.as_nanos() as u64 + 1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn jitter_stays_within_twenty_percent() {
+        let base = Duration::from_secs(15 * 60);
+        let lower = base - base / 5;
+        let upper = base + base / 5;
+
+        for _ in 0..1000 {
+            let jittered = jittered(base);
+            assert!(
+                jittered >= lower && jittered <= upper,
+                "{jittered:?} outside [{lower:?}, {upper:?}]"
+            );
+        }
+    }
+
+    #[test]
+    fn random_duration_up_to_zero_is_zero() {
+        assert_eq!(random_duration_up_to(Duration::ZERO), Duration::ZERO);
+    }
+
+    #[test]
+    fn random_duration_up_to_respects_bound() {
+        let max = Duration::from_secs(60);
+        for _ in 0..1000 {
+            assert!(random_duration_up_to(max) <= max);
+        }
     }
 }

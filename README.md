@@ -70,7 +70,7 @@ Die Datei wird beim Start aus dem aktuellen Arbeitsverzeichnis geladen. Werte, d
 | `GOTIFY_TOKEN` | ja | Token der Gotify-App |
 | `GOTIFY_PRIORITY` | nein | Priorität der Nachrichten, 0–10, Standard `5` |
 | `SEMESTER_ID` | nein | Dualis-ID eines Semesters, leer für alle Ergebnisse |
-| `CHECK_INTERVAL_MINUTES` | nein | Dauerhaft laufen und alle N Minuten prüfen; leer für eine einzelne Prüfung |
+| `CHECK_INTERVAL_MINUTES` | nein | Dauerhaft laufen und alle N Minuten prüfen (±20 % zufällig gestreut, siehe unten); leer für eine einzelne Prüfung |
 | `DATA_DIR` | nein | Ordner für `grades.csv` und `grades.html`, Standard: aktuelles Verzeichnis |
 | `AGENT_NAME` | nein | User-Agent gegenüber Dualis, Standard `Dualis Notifier` |
 
@@ -136,7 +136,7 @@ Live-Logs ansehen:
 tail -f ~/dualis-notifier/notifier.log
 ```
 
-Ohne cron geht es auch: Mit `CHECK_INTERVAL_MINUTES=15` läuft das Programm dauerhaft und prüft selbst alle 15 Minuten, z. B. als systemd-Dienst.
+Ohne cron geht es auch: Mit `CHECK_INTERVAL_MINUTES=15` läuft das Programm dauerhaft und prüft selbst alle 15 Minuten, z. B. als systemd-Dienst. Der tatsächliche Abstand zwischen zwei Prüfungen wird dabei zufällig um ±20 % gestreut (bei 15 Minuten also 12–18), damit die Anfragen nicht in einem exakt gleichbleibenden Takt bei Dualis ankommen.
 
 ## Abgerufene Noten ansehen
 
