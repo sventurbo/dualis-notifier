@@ -5,6 +5,8 @@ use std::time::Duration;
 use std::{env, thread};
 
 use anyhow::{Context, Result};
+use chrono::{NaiveTime, Utc};
+use chrono_tz::Tz;
 use dualis_notifier::Notifier;
 use dualis_notifier::config::Config;
 
@@ -63,11 +65,41 @@ fn run(test_notification: bool) -> Result<()> {
     .context("Signal-Handler kann nicht eingerichtet werden")?;
 
     println!("I: Checking every {} min (±20%)", interval.as_secs() / 60);
+    let (window, timezone) = (notifier.config().check_window, notifier.config().timezone);
+    if let Some((start, end)) = window {
+        println!(
+            "I: Only checking between {} and {} ({timezone})",
+            start.format("%H:%M"),
+            end.format("%H:%M")
+        );
+    }
     loop {
-        if let Err(error) = notifier.run_once() {
-            eprintln!("E: {error:#}");
+        if in_check_window(window, timezone, Utc::now()) {
+            if let Err(error) = notifier.run_once() {
+                eprintln!("E: {error:#}");
+            }
+        } else {
+            println!("I: Outside check window, skipping");
         }
         thread::sleep(jittered(interval));
+    }
+}
+
+/// Whether `now` (interpreted in `timezone`) falls inside `window`. No
+/// window means always. `start > end` wraps past midnight.
+fn in_check_window(
+    window: Option<(NaiveTime, NaiveTime)>,
+    timezone: Tz,
+    now: chrono::DateTime<Utc>,
+) -> bool {
+    let Some((start, end)) = window else {
+        return true;
+    };
+    let local = now.with_timezone(&timezone).time();
+    if start <= end {
+        local >= start && local < end
+    } else {
+        local >= start || local < end
     }
 }
 
@@ -119,5 +151,64 @@ mod tests {
         for _ in 0..1000 {
             assert!(random_duration_up_to(max) <= max);
         }
+    }
+
+    fn berlin_at(hour: u32, minute: u32) -> chrono::DateTime<Utc> {
+        use chrono::TimeZone;
+        // A fixed summer date (CEST, UTC+2) so the offset is predictable.
+        Tz::Europe__Berlin
+            .with_ymd_and_hms(2026, 7, 15, hour, minute, 0)
+            .unwrap()
+            .with_timezone(&Utc)
+    }
+
+    #[test]
+    fn no_window_always_checks() {
+        assert!(in_check_window(None, Tz::UTC, berlin_at(3, 0)));
+    }
+
+    #[test]
+    fn daytime_window_excludes_night() {
+        let window = Some((
+            NaiveTime::from_hms_opt(6, 0, 0).unwrap(),
+            NaiveTime::from_hms_opt(18, 0, 0).unwrap(),
+        ));
+
+        assert!(in_check_window(window, Tz::Europe__Berlin, berlin_at(6, 0)));
+        assert!(in_check_window(
+            window,
+            Tz::Europe__Berlin,
+            berlin_at(17, 59)
+        ));
+        assert!(!in_check_window(
+            window,
+            Tz::Europe__Berlin,
+            berlin_at(18, 0)
+        ));
+        assert!(!in_check_window(
+            window,
+            Tz::Europe__Berlin,
+            berlin_at(3, 0)
+        ));
+    }
+
+    #[test]
+    fn overnight_window_wraps_midnight() {
+        let window = Some((
+            NaiveTime::from_hms_opt(22, 0, 0).unwrap(),
+            NaiveTime::from_hms_opt(6, 0, 0).unwrap(),
+        ));
+
+        assert!(in_check_window(
+            window,
+            Tz::Europe__Berlin,
+            berlin_at(23, 0)
+        ));
+        assert!(in_check_window(window, Tz::Europe__Berlin, berlin_at(1, 0)));
+        assert!(!in_check_window(
+            window,
+            Tz::Europe__Berlin,
+            berlin_at(12, 0)
+        ));
     }
 }

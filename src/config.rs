@@ -2,11 +2,14 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::LazyLock;
 use std::time::Duration;
 use std::{env, fs, io};
 
 use anyhow::{Context, Result, bail};
+use chrono::NaiveTime;
+use chrono_tz::Tz;
 use regex::Regex;
 
 pub const DEFAULT_DUALIS_URL: &str = "https://dualis.dhbw.de";
@@ -30,6 +33,12 @@ pub struct Config {
     pub gotify_priority: u8,
     /// `None` runs a single check, e.g. from cron.
     pub check_interval: Option<Duration>,
+    /// Only checks Dualis inside this local time range, e.g. to look like a
+    /// student instead of a bot running at 3am. `None` checks around the
+    /// clock. Only applied in the daemon loop, not a single cron-run.
+    pub check_window: Option<(NaiveTime, NaiveTime)>,
+    /// Timezone `check_window` is interpreted in. Defaults to UTC.
+    pub timezone: Tz,
     /// Where `grades.csv` and `grades.html` are kept.
     pub data_dir: PathBuf,
     /// Only changed by tests, which point it at a mock server.
@@ -97,6 +106,14 @@ impl Config {
                 Some(Duration::from_secs(minutes * 60))
             }
         };
+        let check_window = get("CHECK_WINDOW")
+            .map(|value| parse_window(&value))
+            .transpose()?;
+        let timezone = match get("TZ") {
+            None => Tz::UTC,
+            Some(value) => Tz::from_str(&value)
+                .map_err(|_| anyhow::anyhow!("TZ ist keine bekannte Zeitzone: {value:?}"))?,
+        };
         let required = |key: &str| get(key).expect("checked above");
 
         Ok(Self {
@@ -108,10 +125,21 @@ impl Config {
             gotify_token: required("GOTIFY_TOKEN").trim().to_owned(),
             gotify_priority,
             check_interval,
+            check_window,
+            timezone,
             data_dir: get("DATA_DIR").map_or_else(|| PathBuf::from("."), PathBuf::from),
             dualis_base_url: DEFAULT_DUALIS_URL.to_owned(),
         })
     }
+}
+
+/// Parse `CHECK_WINDOW=HH:MM-HH:MM`. `start > end` wraps past midnight.
+fn parse_window(value: &str) -> Result<(NaiveTime, NaiveTime)> {
+    let invalid = || format!("CHECK_WINDOW muss im Format HH:MM-HH:MM sein, nicht {value:?}");
+    let (start, end) = value.split_once('-').with_context(invalid)?;
+    let parse_time =
+        |part: &str| NaiveTime::parse_from_str(part.trim(), "%H:%M").with_context(invalid);
+    Ok((parse_time(start)?, parse_time(end)?))
 }
 
 /// Parse `.env` like python-dotenv, which the Python version used, so existing
@@ -246,6 +274,8 @@ DOLLAR=p$ss
         assert_eq!(config.user_agent, "Dualis Notifier");
         assert_eq!(config.gotify_priority, 5);
         assert_eq!(config.check_interval, None);
+        assert_eq!(config.check_window, None);
+        assert_eq!(config.timezone, Tz::UTC);
         assert_eq!(config.data_dir, PathBuf::from("."));
         assert_eq!(config.dualis_base_url, DEFAULT_DUALIS_URL);
     }
@@ -286,6 +316,8 @@ DOLLAR=p$ss
             ("CHECK_INTERVAL_MINUTES", "15"),
             ("DATA_DIR", "/data"),
             ("SEMESTER_ID", "-N000000015178000"),
+            ("CHECK_WINDOW", "06:00-18:00"),
+            ("TZ", "Europe/Berlin"),
         ]);
 
         let config = config(&pairs).unwrap();
@@ -294,6 +326,29 @@ DOLLAR=p$ss
         assert_eq!(config.check_interval, Some(Duration::from_secs(900)));
         assert_eq!(config.data_dir, PathBuf::from("/data"));
         assert_eq!(config.semester_id, "-N000000015178000");
+        assert_eq!(
+            config.check_window,
+            Some((
+                NaiveTime::from_hms_opt(6, 0, 0).unwrap(),
+                NaiveTime::from_hms_opt(18, 0, 0).unwrap()
+            ))
+        );
+        assert_eq!(config.timezone, Tz::Europe__Berlin);
+    }
+
+    #[test]
+    fn rejects_invalid_check_window_or_timezone() {
+        for (key, value) in [
+            ("CHECK_WINDOW", "not-a-window"),
+            ("CHECK_WINDOW", "06:00"),
+            ("CHECK_WINDOW", "25:00-18:00"),
+            ("TZ", "Nowhere/Fictional"),
+        ] {
+            let mut pairs = MINIMAL.to_vec();
+            pairs.push((key, value));
+
+            assert!(config(&pairs).is_err(), "{key}={value}");
+        }
     }
 
     #[test]

@@ -71,6 +71,8 @@ Die Datei wird beim Start aus dem aktuellen Arbeitsverzeichnis geladen. Werte, d
 | `GOTIFY_PRIORITY` | nein | Priorität der Nachrichten, 0–10, Standard `5` |
 | `SEMESTER_ID` | nein | Dualis-ID eines Semesters, leer für alle Ergebnisse |
 | `CHECK_INTERVAL_MINUTES` | nein | Dauerhaft laufen und alle N Minuten prüfen (±20 % zufällig gestreut, siehe unten); leer für eine einzelne Prüfung |
+| `CHECK_WINDOW` | nein | Nur innerhalb dieser Uhrzeit prüfen, z. B. `06:00-18:00` (nur im Dauerbetrieb, nicht bei einer einzelnen cron-Prüfung); leer prüft rund um die Uhr |
+| `TZ` | nein | Zeitzone für `CHECK_WINDOW`, z. B. `Europe/Berlin`, Standard `UTC` |
 | `DATA_DIR` | nein | Ordner für `grades.csv` und `grades.html`, Standard: aktuelles Verzeichnis |
 | `AGENT_NAME` | nein | User-Agent gegenüber Dualis, Standard `Dualis Notifier` |
 
@@ -136,7 +138,7 @@ Live-Logs ansehen:
 tail -f ~/dualis-notifier/notifier.log
 ```
 
-Ohne cron geht es auch: Mit `CHECK_INTERVAL_MINUTES=15` läuft das Programm dauerhaft und prüft selbst alle 15 Minuten, z. B. als systemd-Dienst. Der tatsächliche Abstand zwischen zwei Prüfungen wird dabei zufällig um ±20 % gestreut (bei 15 Minuten also 12–18), damit die Anfragen nicht in einem exakt gleichbleibenden Takt bei Dualis ankommen.
+Ohne cron geht es auch: Mit `CHECK_INTERVAL_MINUTES=15` läuft das Programm dauerhaft und prüft selbst alle 15 Minuten, z. B. als systemd-Dienst. Der tatsächliche Abstand zwischen zwei Prüfungen wird dabei zufällig um ±20 % gestreut (bei 15 Minuten also 12–18), damit die Anfragen nicht in einem exakt gleichbleibenden Takt bei Dualis ankommen. Mit `CHECK_WINDOW` (z. B. `06:00-18:00`) und `TZ` (z. B. `Europe/Berlin`) lässt sich der Dauerbetrieb zusätzlich auf eine Tageszeit beschränken; außerhalb des Fensters wird nur gewartet, ohne bei Dualis anzufragen.
 
 ## Abgerufene Noten ansehen
 
