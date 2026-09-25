@@ -168,6 +168,7 @@ Das Projekt lässt sich auch als Container ausführen. Ein fertiges Image steht 
 
 ```bash
 docker run -d --name dualis-notifier --restart unless-stopped \
+  --log-opt max-size=10m --log-opt max-file=3 \
   --env-file .env \
   -v dualis-data:/data \
   ghcr.io/sventurbo/dualis-notifier:latest
@@ -178,12 +179,13 @@ Alternativ selbst bauen:
 ```bash
 docker build -t dualis-notifier .
 docker run -d --name dualis-notifier --restart unless-stopped \
+  --log-opt max-size=10m --log-opt max-file=3 \
   --env-file .env \
   -v dualis-data:/data \
   dualis-notifier
 ```
 
-Der Container prüft alle 15 Minuten (änderbar über `CHECK_INTERVAL_MINUTES`). Die Noten liegen im Volume `dualis-data` und bleiben erhalten, wenn der Container neu erstellt wird.
+Der Container prüft alle 15 Minuten (änderbar über `CHECK_INTERVAL_MINUTES`). Die Noten liegen im Volume `dualis-data` und bleiben erhalten, wenn der Container neu erstellt wird. Die `--log-opt`-Flags begrenzen die Logs auf max. 30 MB, da der Container dauerhaft läuft und sonst unbegrenzt wachsen würde.
 
 Gotify-Verbindung testen und Logs ansehen:
 
