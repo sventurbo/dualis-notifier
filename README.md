@@ -214,3 +214,7 @@ cargo fmt --check
 - Teile weder deine Dualis-Zugangsdaten noch dein Gotify-App-Token.
 - Gib keine Dualis-URLs mit `ARGUMENTS=-N…` weiter; sie können eine temporäre Sitzungskennung enthalten.
 - Die lokale `.env` ist per `.gitignore` vom Commit und per `.dockerignore` vom Docker-Image ausgeschlossen. Prüfe vor einem Commit trotzdem immer `git status`.
+
+## Lizenz
+
+Dieses Projekt steht unter der [GNU General Public License v3.0](LICENSE). Ursprünglich als Fork von [mfloto/dualis-notifier](https://github.com/mfloto/dualis-notifier) entstanden, mittlerweile vollständig in Rust neu geschrieben.

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Checks Dualis for new or changed grades and sends them to Gotify"
+license = "GPL-3.0-or-later"
 publish = false
 
 [dependencies]
