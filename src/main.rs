@@ -5,7 +5,7 @@ use std::time::Duration;
 use std::{env, thread};
 
 use anyhow::{Context, Result};
-use chrono::{NaiveTime, Utc};
+use chrono::{Datelike, NaiveTime, Utc, Weekday};
 use chrono_tz::Tz;
 use dualis_notifier::Notifier;
 use dualis_notifier::config::Config;
@@ -65,7 +65,8 @@ fn run(test_notification: bool) -> Result<()> {
     .context("Signal-Handler kann nicht eingerichtet werden")?;
 
     println!("I: Checking every {} min (±20%)", interval.as_secs() / 60);
-    let (window, timezone) = (notifier.config().check_window, notifier.config().timezone);
+    let config = notifier.config();
+    let (window, days, timezone) = (config.check_window, config.check_days, config.timezone);
     if let Some((start, end)) = window {
         println!(
             "I: Only checking between {} and {} ({timezone})",
@@ -73,8 +74,12 @@ fn run(test_notification: bool) -> Result<()> {
             end.format("%H:%M")
         );
     }
+    if let Some((first, last)) = days {
+        println!("I: Only checking {first}-{last} ({timezone})");
+    }
     loop {
-        if in_check_window(window, timezone, Utc::now()) {
+        let now = Utc::now();
+        if in_check_window(window, timezone, now) && on_check_day(days, timezone, now) {
             if let Err(error) = notifier.run_once() {
                 eprintln!("E: {error:#}");
             }
@@ -100,6 +105,28 @@ fn in_check_window(
         local >= start && local < end
     } else {
         local >= start || local < end
+    }
+}
+
+/// Whether `now` (interpreted in `timezone`) falls on one of `days`, both
+/// ends included. No days means every day. `first > last` wraps past Sunday.
+fn on_check_day(
+    days: Option<(Weekday, Weekday)>,
+    timezone: Tz,
+    now: chrono::DateTime<Utc>,
+) -> bool {
+    let Some((first, last)) = days else {
+        return true;
+    };
+    let day = now
+        .with_timezone(&timezone)
+        .weekday()
+        .num_days_from_monday();
+    let (first, last) = (first.num_days_from_monday(), last.num_days_from_monday());
+    if first <= last {
+        day >= first && day <= last
+    } else {
+        day >= first || day <= last
     }
 }
 
@@ -154,10 +181,16 @@ mod tests {
     }
 
     fn berlin_at(hour: u32, minute: u32) -> chrono::DateTime<Utc> {
+        berlin_on(15, hour, minute)
+    }
+
+    /// A day in July 2026: the 15th is a Wednesday, the 17th a Friday, the
+    /// 18th a Saturday, the 19th a Sunday and the 20th a Monday.
+    fn berlin_on(day: u32, hour: u32, minute: u32) -> chrono::DateTime<Utc> {
         use chrono::TimeZone;
         // A fixed summer date (CEST, UTC+2) so the offset is predictable.
         Tz::Europe__Berlin
-            .with_ymd_and_hms(2026, 7, 15, hour, minute, 0)
+            .with_ymd_and_hms(2026, 7, day, hour, minute, 0)
             .unwrap()
             .with_timezone(&Utc)
     }
@@ -210,5 +243,51 @@ mod tests {
             Tz::Europe__Berlin,
             berlin_at(12, 0)
         ));
+    }
+
+    #[test]
+    fn no_days_always_checks() {
+        assert!(on_check_day(None, Tz::UTC, berlin_on(19, 12, 0)));
+    }
+
+    #[test]
+    fn weekdays_exclude_weekend() {
+        let days = Some((Weekday::Mon, Weekday::Fri));
+
+        assert!(on_check_day(days, Tz::Europe__Berlin, berlin_on(17, 12, 0)));
+        assert!(on_check_day(days, Tz::Europe__Berlin, berlin_on(20, 12, 0)));
+        assert!(!on_check_day(
+            days,
+            Tz::Europe__Berlin,
+            berlin_on(18, 12, 0)
+        ));
+        assert!(!on_check_day(
+            days,
+            Tz::Europe__Berlin,
+            berlin_on(19, 12, 0)
+        ));
+    }
+
+    #[test]
+    fn day_range_wraps_past_sunday() {
+        let days = Some((Weekday::Fri, Weekday::Mon));
+
+        assert!(on_check_day(days, Tz::Europe__Berlin, berlin_on(18, 12, 0)));
+        assert!(on_check_day(days, Tz::Europe__Berlin, berlin_on(20, 12, 0)));
+        assert!(!on_check_day(
+            days,
+            Tz::Europe__Berlin,
+            berlin_on(15, 12, 0)
+        ));
+    }
+
+    #[test]
+    fn weekday_uses_configured_timezone() {
+        let days = Some((Weekday::Mon, Weekday::Fri));
+        // Saturday 00:30 in Berlin is still Friday 22:30 in UTC.
+        let saturday_night = berlin_on(18, 0, 30);
+
+        assert!(!on_check_day(days, Tz::Europe__Berlin, saturday_night));
+        assert!(on_check_day(days, Tz::UTC, saturday_night));
     }
 }

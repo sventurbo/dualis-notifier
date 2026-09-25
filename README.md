@@ -72,7 +72,8 @@ Die Datei wird beim Start aus dem aktuellen Arbeitsverzeichnis geladen. Werte, d
 | `SEMESTER_ID` | nein | Dualis-ID eines Semesters, leer für alle Ergebnisse |
 | `CHECK_INTERVAL_MINUTES` | nein | Dauerhaft laufen und alle N Minuten prüfen (±20 % zufällig gestreut, siehe unten); leer für eine einzelne Prüfung |
 | `CHECK_WINDOW` | nein | Nur innerhalb dieser Uhrzeit prüfen, z. B. `06:00-18:00` (nur im Dauerbetrieb, nicht bei einer einzelnen cron-Prüfung); leer prüft rund um die Uhr |
-| `TZ` | nein | Zeitzone für `CHECK_WINDOW`, z. B. `Europe/Berlin`, Standard `UTC` |
+| `CHECK_DAYS` | nein | Nur an diesen Wochentagen prüfen, z. B. `Mo-Fr` (Kürzel `Mo Di Mi Do Fr Sa So`, beide Enden inklusive; nur im Dauerbetrieb, nicht bei einer einzelnen cron-Prüfung); leer prüft jeden Tag |
+| `TZ` | nein | Zeitzone für `CHECK_WINDOW` und `CHECK_DAYS`, z. B. `Europe/Berlin`, Standard `UTC` |
 | `DATA_DIR` | nein | Ordner für `grades.csv` und `grades.html`, Standard: aktuelles Verzeichnis |
 | `AGENT_NAME` | nein | User-Agent gegenüber Dualis, Standard `Dualis Notifier` |
 
@@ -114,7 +115,7 @@ Kann eine Nachricht nicht zugestellt werden, etwa weil Gotify nicht erreichbar i
 
 ## Automatisch prüfen
 
-Für eine Prüfung alle 15 Minuten von 06:00 bis 19:45 Uhr täglich, diese Crontab einrichten:
+Für eine Prüfung alle 15 Minuten von 06:00 bis 19:45 Uhr, montags bis freitags (cron nutzt dabei die Zeitzone des Systems), diese Crontab einrichten:
 
 ```bash
 crontab -e
@@ -123,7 +124,7 @@ crontab -e
 Folgende Zeile einfügen:
 
 ```cron
-*/15 6-19 * * * cd "$HOME/dualis-notifier" && ./target/release/dualis-notifier >> "$HOME/dualis-notifier/notifier.log" 2>&1
+*/15 6-19 * * 1-5 cd "$HOME/dualis-notifier" && ./target/release/dualis-notifier >> "$HOME/dualis-notifier/notifier.log" 2>&1
 ```
 
 Den eingerichteten Zeitplan anzeigen:
@@ -138,7 +139,7 @@ Live-Logs ansehen:
 tail -f ~/dualis-notifier/notifier.log
 ```
 
-Ohne cron geht es auch: Mit `CHECK_INTERVAL_MINUTES=15` läuft das Programm dauerhaft und prüft selbst alle 15 Minuten, z. B. als systemd-Dienst. Der tatsächliche Abstand zwischen zwei Prüfungen wird dabei zufällig um ±20 % gestreut (bei 15 Minuten also 12–18), damit die Anfragen nicht in einem exakt gleichbleibenden Takt bei Dualis ankommen. Mit `CHECK_WINDOW` (z. B. `06:00-18:00`) und `TZ` (z. B. `Europe/Berlin`) lässt sich der Dauerbetrieb zusätzlich auf eine Tageszeit beschränken; außerhalb des Fensters wird nur gewartet, ohne bei Dualis anzufragen.
+Ohne cron geht es auch: Mit `CHECK_INTERVAL_MINUTES=15` läuft das Programm dauerhaft und prüft selbst alle 15 Minuten, z. B. als systemd-Dienst. Der tatsächliche Abstand zwischen zwei Prüfungen wird dabei zufällig um ±20 % gestreut (bei 15 Minuten also 12–18), damit die Anfragen nicht in einem exakt gleichbleibenden Takt bei Dualis ankommen. Mit `CHECK_WINDOW` (z. B. `06:00-18:00`) und `TZ` (z. B. `Europe/Berlin`) lässt sich der Dauerbetrieb zusätzlich auf eine Tageszeit beschränken, mit `CHECK_DAYS` (z. B. `Mo-Fr`) auf bestimmte Wochentage; außerhalb davon wird nur gewartet, ohne bei Dualis anzufragen.
 
 ## Abgerufene Noten ansehen
 

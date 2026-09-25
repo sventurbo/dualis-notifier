@@ -8,7 +8,7 @@ use std::time::Duration;
 use std::{env, fs, io};
 
 use anyhow::{Context, Result, bail};
-use chrono::NaiveTime;
+use chrono::{NaiveTime, Weekday};
 use chrono_tz::Tz;
 use regex::Regex;
 
@@ -37,7 +37,12 @@ pub struct Config {
     /// student instead of a bot running at 3am. `None` checks around the
     /// clock. Only applied in the daemon loop, not a single cron-run.
     pub check_window: Option<(NaiveTime, NaiveTime)>,
-    /// Timezone `check_window` is interpreted in. Defaults to UTC.
+    /// Only checks Dualis on these local weekdays (inclusive), e.g. to skip
+    /// weekends when nobody enters grades. `None` checks every day. Only
+    /// applied in the daemon loop, not a single cron-run.
+    pub check_days: Option<(Weekday, Weekday)>,
+    /// Timezone `check_window` and `check_days` are interpreted in. Defaults
+    /// to UTC.
     pub timezone: Tz,
     /// Where `grades.csv` and `grades.html` are kept.
     pub data_dir: PathBuf,
@@ -109,6 +114,9 @@ impl Config {
         let check_window = get("CHECK_WINDOW")
             .map(|value| parse_window(&value))
             .transpose()?;
+        let check_days = get("CHECK_DAYS")
+            .map(|value| parse_days(&value))
+            .transpose()?;
         let timezone = match get("TZ") {
             None => Tz::UTC,
             Some(value) => Tz::from_str(&value)
@@ -126,6 +134,7 @@ impl Config {
             gotify_priority,
             check_interval,
             check_window,
+            check_days,
             timezone,
             data_dir: get("DATA_DIR").map_or_else(|| PathBuf::from("."), PathBuf::from),
             dualis_base_url: DEFAULT_DUALIS_URL.to_owned(),
@@ -140,6 +149,33 @@ fn parse_window(value: &str) -> Result<(NaiveTime, NaiveTime)> {
     let parse_time =
         |part: &str| NaiveTime::parse_from_str(part.trim(), "%H:%M").with_context(invalid);
     Ok((parse_time(start)?, parse_time(end)?))
+}
+
+/// Parse `CHECK_DAYS=Mo-Fr` with German day abbreviations. Both ends are
+/// included; `start > end` wraps past Sunday, e.g. `Fr-Mo`.
+fn parse_days(value: &str) -> Result<(Weekday, Weekday)> {
+    let invalid = || {
+        format!(
+            "CHECK_DAYS muss im Format Mo-Fr sein (Mo, Di, Mi, Do, Fr, Sa, So), nicht {value:?}"
+        )
+    };
+    let (start, end) = value.split_once('-').with_context(invalid)?;
+    let parse_day = |part: &str| german_weekday(part.trim()).with_context(invalid);
+    Ok((parse_day(start)?, parse_day(end)?))
+}
+
+fn german_weekday(abbreviation: &str) -> Option<Weekday> {
+    let day = match abbreviation.to_lowercase().as_str() {
+        "mo" => Weekday::Mon,
+        "di" => Weekday::Tue,
+        "mi" => Weekday::Wed,
+        "do" => Weekday::Thu,
+        "fr" => Weekday::Fri,
+        "sa" => Weekday::Sat,
+        "so" => Weekday::Sun,
+        _ => return None,
+    };
+    Some(day)
 }
 
 /// Parse `.env` like python-dotenv, which the Python version used, so existing
@@ -275,6 +311,7 @@ DOLLAR=p$ss
         assert_eq!(config.gotify_priority, 5);
         assert_eq!(config.check_interval, None);
         assert_eq!(config.check_window, None);
+        assert_eq!(config.check_days, None);
         assert_eq!(config.timezone, Tz::UTC);
         assert_eq!(config.data_dir, PathBuf::from("."));
         assert_eq!(config.dualis_base_url, DEFAULT_DUALIS_URL);
@@ -317,6 +354,7 @@ DOLLAR=p$ss
             ("DATA_DIR", "/data"),
             ("SEMESTER_ID", "-N000000015178000"),
             ("CHECK_WINDOW", "06:00-18:00"),
+            ("CHECK_DAYS", "Mo-Fr"),
             ("TZ", "Europe/Berlin"),
         ]);
 
@@ -333,6 +371,7 @@ DOLLAR=p$ss
                 NaiveTime::from_hms_opt(18, 0, 0).unwrap()
             ))
         );
+        assert_eq!(config.check_days, Some((Weekday::Mon, Weekday::Fri)));
         assert_eq!(config.timezone, Tz::Europe__Berlin);
     }
 
@@ -342,6 +381,9 @@ DOLLAR=p$ss
             ("CHECK_WINDOW", "not-a-window"),
             ("CHECK_WINDOW", "06:00"),
             ("CHECK_WINDOW", "25:00-18:00"),
+            ("CHECK_DAYS", "Mo"),
+            ("CHECK_DAYS", "Mon-Fri"),
+            ("CHECK_DAYS", "Mo-Xy"),
             ("TZ", "Nowhere/Fictional"),
         ] {
             let mut pairs = MINIMAL.to_vec();
