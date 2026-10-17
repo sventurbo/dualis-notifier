@@ -93,11 +93,11 @@ cd ~/dualis-notifier
 ./target/release/dualis-notifier
 ```
 
-Beim ersten erfolgreichen Lauf erscheinen diese Meldungen:
+Beim ersten erfolgreichen Lauf erscheinen diese Meldungen (jede Zeile beginnt mit einem Zeitstempel):
 
 ```text
-W: No cache found
-I: Created cache
+2026-10-17T06:15:03+02:00 W: No cache found
+2026-10-17T06:15:03+02:00 I: Created cache
 ```
 
 Das ist erwartetes Verhalten: Es wird lediglich `grades.csv` als Ausgangsstand angelegt. Es wird dabei noch keine Gotify-Nachricht gesendet.
@@ -110,6 +110,11 @@ Es gibt nur diese Benachrichtigungen:
 
 - **Neue Note**: ein bisher unbekanntes Modul erscheint nach dem ersten Lauf.
 - **Note geändert**: die gespeicherten Daten eines bekannten Moduls haben sich geändert.
+
+Ändern sich in einem Lauf mehrere Module, werden sie zu einer einzigen Nachricht
+zusammengefasst („N Noten aktualisiert“). Dadurch kann eine fehlgeschlagene
+Zustellung den ganzen Stapel erneut senden, ohne dass bereits zugestellte Noten
+doppelt ankommen.
 
 Kann eine Nachricht nicht zugestellt werden, etwa weil Gotify nicht erreichbar ist, bleibt `grades.csv` unverändert. Der nächste Lauf erkennt die Änderung dann erneut und versucht es noch einmal.
 

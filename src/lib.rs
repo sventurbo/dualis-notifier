@@ -1,8 +1,11 @@
 //! Checks Dualis for new or changed grades and reports them through Gotify.
 
+#![forbid(unsafe_code)]
+
 pub mod config;
 pub mod dualis;
 pub mod gotify;
+pub mod log;
 pub mod parse;
 pub mod state;
 pub mod table;
@@ -83,20 +86,25 @@ impl Notifier {
         let Some(previous) = previous else {
             // First run: record what is there without announcing it.
             state::save_cache(&cache_file, &state::baseline(&current, &observed_at)?)?;
-            println!("W: No cache found");
-            println!("I: Created cache");
+            log::warn("No cache found");
+            log::info("Created cache");
             return Ok(());
         };
 
         let (new_state, events) = state::reconcile(&previous, &current, &observed_at)?;
         if events.is_empty() {
-            println!("I: No changes");
+            log::info("No changes");
+        } else {
+            for event in &events {
+                log::info(&format!("{} grade for {}", event.kind.label(), event.name));
+            }
+            // One combined message per run: a single send is atomic, so a
+            // failure retries the whole batch instead of re-sending the grades
+            // that already went out. This avoids duplicate notifications when
+            // several modules change at once.
+            self.gotify.send(&Notification::for_events(&events))?;
         }
-        for event in &events {
-            println!("I: {} grade for {}", event.kind.label(), event.name);
-            self.gotify.send(&Notification::for_event(event))?;
-        }
-        // Only now: if a notification failed, the next run detects it again.
+        // Only now: if the notification failed, the next run detects it again.
         state::save_cache(&cache_file, &new_state)
     }
 }

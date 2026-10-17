@@ -16,6 +16,16 @@ const RESULTS_WITHOUT_MATHS: &str = "<table><thead><tr><th>Nr.</th><th>Name</th>
     <tr><td>T3INF1003</td><td>Einführung in die Öffentlichkeitsarbeit – Grundlagen</td>\
     <td>2,0</td><td>5,0</td><td>bestanden</td><td>Prüfungen</td></tr></tbody></table>";
 
+/// Two modules get a grade in the same run; the third stays unchanged.
+const RESULTS_TWO_CHANGES: &str = "<table><thead><tr><th>Nr.</th><th>Name</th>\
+    <th>Endnote</th><th>Credits</th><th>Status</th><th></th></tr></thead><tbody>\
+    <tr><td>T3INF1001</td><td>Mathematik I (WiSe 2023/24)</td><td>1,3</td>\
+    <td>8,0</td><td>bestanden</td><td>Prüfungen</td></tr>\
+    <tr><td>T3INF1002</td><td>Theoretische Informatik I</td><td>noch nicht gesetzt</td>\
+    <td>5,0</td><td></td><td>Prüfungen</td></tr>\
+    <tr><td>T3INF1003</td><td>Einführung in die Öffentlichkeitsarbeit – Grundlagen</td>\
+    <td>1,7</td><td>5,0</td><td>bestanden</td><td>Prüfungen</td></tr></tbody></table>";
+
 struct Harness {
     dualis: ServerGuard,
     gotify: ServerGuard,
@@ -148,6 +158,32 @@ fn failed_notification_keeps_cache_so_the_next_run_retries() {
         RESULTS_CHANGED,
         &["Note geändert: Theoretische Informatik I"],
     );
+}
+
+#[test]
+fn multiple_changes_are_sent_once_and_retried_as_a_whole() {
+    let mut harness = Harness::new();
+    harness.run(RESULTS, &[]);
+    let baseline = harness.cache();
+
+    // If the send fails, nothing is persisted, so the next run retries both.
+    let results = harness.serve_results(RESULTS_TWO_CHANGES);
+    let failing = harness
+        .gotify
+        .mock("POST", "/message")
+        .with_status(500)
+        .create();
+    assert!(harness.notifier.run_once().is_err());
+    assert_eq!(harness.cache(), baseline);
+    results.remove();
+    failing.remove();
+
+    // The retry produces exactly one message for both changes, never a
+    // duplicate of a grade that was already delivered.
+    harness.run(RESULTS_TWO_CHANGES, &["2 Noten aktualisiert"]);
+
+    // With the cache now up to date the next run is silent.
+    harness.run(RESULTS_TWO_CHANGES, &[]);
 }
 
 #[test]

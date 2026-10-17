@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 use std::process::ExitCode;
@@ -9,6 +11,7 @@ use chrono::{Datelike, NaiveTime, Utc, Weekday};
 use chrono_tz::Tz;
 use dualis_notifier::Notifier;
 use dualis_notifier::config::Config;
+use dualis_notifier::log;
 
 const USAGE: &str = "\
 Usage: dualis-notifier [--test-notification]
@@ -30,7 +33,7 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         _ => {
-            eprintln!("E: Unknown arguments: {}\n\n{USAGE}", args.join(" "));
+            log::error(&format!("Unknown arguments: {}\n\n{USAGE}", args.join(" ")));
             return ExitCode::from(2);
         }
     };
@@ -38,7 +41,7 @@ fn main() -> ExitCode {
     match run(test_notification) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("E: {error:#}");
+            log::error(&format!("{error:#}"));
             ExitCode::FAILURE
         }
     }
@@ -49,7 +52,7 @@ fn run(test_notification: bool) -> Result<()> {
 
     if test_notification {
         notifier.send_test_notification()?;
-        println!("I: Test notification sent");
+        log::info("Test notification sent");
         return Ok(());
     }
 
@@ -59,32 +62,35 @@ fn run(test_notification: bool) -> Result<()> {
 
     // Exit promptly on `docker stop`; the cache is written atomically.
     ctrlc::set_handler(|| {
-        println!("I: Stopping notifier");
+        log::info("Stopping notifier");
         std::process::exit(0);
     })
     .context("Signal-Handler kann nicht eingerichtet werden")?;
 
-    println!("I: Checking every {} min (±20%)", interval.as_secs() / 60);
+    log::info(&format!(
+        "Checking every {} min (±20%)",
+        interval.as_secs() / 60
+    ));
     let config = notifier.config();
     let (window, days, timezone) = (config.check_window, config.check_days, config.timezone);
     if let Some((start, end)) = window {
-        println!(
-            "I: Only checking between {} and {} ({timezone})",
+        log::info(&format!(
+            "Only checking between {} and {} ({timezone})",
             start.format("%H:%M"),
             end.format("%H:%M")
-        );
+        ));
     }
     if let Some((first, last)) = days {
-        println!("I: Only checking {first}-{last} ({timezone})");
+        log::info(&format!("Only checking {first}-{last} ({timezone})"));
     }
     loop {
         let now = Utc::now();
         if in_check_window(window, timezone, now) && on_check_day(days, timezone, now) {
             if let Err(error) = notifier.run_once() {
-                eprintln!("E: {error:#}");
+                log::error(&format!("{error:#}"));
             }
         } else {
-            println!("I: Outside check window, skipping");
+            log::info("Outside check window, skipping");
         }
         thread::sleep(jittered(interval));
     }

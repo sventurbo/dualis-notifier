@@ -12,15 +12,7 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - run: cargo test
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo fmt --check
+    uses: ./.github/workflows/ci.yml
 
   build-and-push:
     needs: test

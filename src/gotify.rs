@@ -47,6 +47,39 @@ impl Notification {
             message: "Testnachricht: Die Verbindung zu Gotify funktioniert.".to_owned(),
         }
     }
+
+    /// The message for one run. A single changed grade keeps its dedicated
+    /// wording; several are bundled into one digest so the run sends exactly
+    /// one message. A failed send then retries the whole batch instead of
+    /// re-sending grades that were already delivered.
+    pub fn for_events(events: &[Event]) -> Self {
+        match events {
+            [event] => Self::for_event(event),
+            _ => Self::digest(events),
+        }
+    }
+
+    fn digest(events: &[Event]) -> Self {
+        let mut message = format!("Für {} Module gibt es Neuigkeiten:\n", events.len());
+        for event in events {
+            message.push_str(&format!("\n{}: {}\n", german_kind(event.kind), event.name));
+            message.push_str(&format_fields(&event.fields));
+        }
+        message.push_str(&format!(
+            "Gehe zu {DUALIS_WEB_URL}, um den aktuellen Stand einzusehen."
+        ));
+        Self {
+            title: format!("{} Noten aktualisiert", events.len()),
+            message,
+        }
+    }
+}
+
+fn german_kind(kind: EventKind) -> &'static str {
+    match kind {
+        EventKind::New => "Neue Note",
+        EventKind::Changed => "Note geändert",
+    }
 }
 
 /// One line per changed field, e.g. `Endnote: 1,7 → 1,3`, or just the value
@@ -201,6 +234,59 @@ mod tests {
             notification.message,
             "Für Mathematik wurden neue Ergebnisse veröffentlicht.\n\
              Gehe zu https://dualis.dhbw.de/, um deine Note einzusehen."
+        );
+    }
+
+    #[test]
+    fn multiple_events_become_one_digest_message() {
+        let events = [
+            Event {
+                kind: EventKind::New,
+                name: "Mathematik".into(),
+                fields: vec![FieldChange {
+                    column: "Endnote".into(),
+                    old: None,
+                    new: "1,7".into(),
+                }],
+            },
+            Event {
+                kind: EventKind::Changed,
+                name: "Physik".into(),
+                fields: vec![FieldChange {
+                    column: "Endnote".into(),
+                    old: Some("2,3".into()),
+                    new: "1,7".into(),
+                }],
+            },
+        ];
+
+        let notification = Notification::for_events(&events);
+
+        assert_eq!(notification.title, "2 Noten aktualisiert");
+        assert!(
+            notification.message.contains("Neue Note: Mathematik"),
+            "{}",
+            notification.message
+        );
+        assert!(
+            notification.message.contains("Note geändert: Physik"),
+            "{}",
+            notification.message
+        );
+        assert!(notification.message.contains("Endnote: 2,3 → 1,7"));
+    }
+
+    #[test]
+    fn single_event_keeps_its_dedicated_wording() {
+        let event = Event {
+            kind: EventKind::New,
+            name: "Mathematik".into(),
+            fields: vec![],
+        };
+
+        assert_eq!(
+            Notification::for_events(std::slice::from_ref(&event)),
+            Notification::for_event(&event)
         );
     }
 
